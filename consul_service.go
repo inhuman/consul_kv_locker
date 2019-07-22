@@ -1,25 +1,28 @@
 package consul_kv_locker
 
 import (
-	"github.com/hashicorp/consul/api"
+	consulapi "github.com/hashicorp/consul/api"
 )
 
 type ConsulServiceClient struct {
-	client         *api.Client
+	client         *consulapi.Client
 	sessionID      string
 	sessionTimeout string
+	doneChan       chan struct{}
 }
 
-func (c *ConsulServiceClient) GetKey(path string, q *api.QueryOptions) ([]byte, error) {
-	panic("implement me")
+func (c *ConsulServiceClient) StopRenewSession() error {
+	c.doneChan <- struct{}{}
+	close(c.doneChan)
+	return nil
 }
 
 // CreateSession creates consul session and stores it to ConsulServiceClient
 // if given session is nil, creates default one
-func (c *ConsulServiceClient) CreateSession(session *api.SessionEntry) error {
+func (c *ConsulServiceClient) CreateSession(session *consulapi.SessionEntry) error {
 
 	if session == nil {
-		session = &api.SessionEntry{
+		session = &consulapi.SessionEntry{
 			TTL:      c.sessionTimeout,
 			Behavior: "release",
 		}
@@ -34,14 +37,14 @@ func (c *ConsulServiceClient) CreateSession(session *api.SessionEntry) error {
 	return nil
 }
 
-func (c *ConsulServiceClient) AcquireLock(key string, opts *api.QueryOptions) (bool, error) {
+func (c *ConsulServiceClient) AcquireLock(key string, opts *consulapi.QueryOptions) (bool, error) {
 
 	pair, _, err := c.client.KV().Get(key, opts)
 	if err != nil {
 		return false, err
 	}
 
-	KVpair := &api.KVPair{
+	KVpair := &consulapi.KVPair{
 		Key:     key,
 		Value:   pair.Value,
 		Session: c.sessionID,
@@ -51,14 +54,14 @@ func (c *ConsulServiceClient) AcquireLock(key string, opts *api.QueryOptions) (b
 	return aquired, err
 }
 
-func (c *ConsulServiceClient) ReleaseLock(key string, opts *api.QueryOptions) (bool, error) {
+func (c *ConsulServiceClient) ReleaseLock(key string, opts *consulapi.QueryOptions) (bool, error) {
 
 	pair, _, err := c.client.KV().Get(key, opts)
 	if err != nil {
 		return false, err
 	}
 
-	KVpair := &api.KVPair{
+	KVpair := &consulapi.KVPair{
 		Key:     key,
 		Value:   pair.Value,
 		Session: c.sessionID,
@@ -68,8 +71,8 @@ func (c *ConsulServiceClient) ReleaseLock(key string, opts *api.QueryOptions) (b
 	return released, err
 }
 
-func (c *ConsulServiceClient) RenewSession(doneChan <-chan struct{}) error {
-	err := c.client.Session().RenewPeriodic(c.sessionTimeout, c.sessionID, nil, doneChan)
+func (c *ConsulServiceClient) StartRenewSession() error {
+	err := c.client.Session().RenewPeriodic(c.sessionTimeout, c.sessionID, nil, c.doneChan)
 	if err != nil {
 		return err
 	}
@@ -84,9 +87,24 @@ func (c *ConsulServiceClient) DestroySession() error {
 	return nil
 }
 
-func NewConsulService(client *api.Client, sessionTimeout string) *ConsulServiceClient {
+func NewConsulService(client *consulapi.Client, sessionTimeout string, doneChan chan struct{}) *ConsulServiceClient {
 	return &ConsulServiceClient{
 		client:         client,
 		sessionTimeout: sessionTimeout,
+		doneChan:       doneChan,
+	}
+}
+
+func DefaultConsulClient(consulHttpAddr string) (*consulapi.Client, error) {
+
+	return consulapi.NewClient(&consulapi.Config{
+		Address: consulHttpAddr,
+		Scheme:  "http",
+	})
+}
+
+func DefaultQueryOpts(dc string) *consulapi.QueryOptions {
+	return &consulapi.QueryOptions{
+		Datacenter: dc,
 	}
 }

@@ -15,6 +15,8 @@ func NewLocker(consulService ConsulService) (*Locker, error) {
 		return nil, err
 	}
 
+	go l.service.StartRenewSession()
+
 	return l, nil
 }
 
@@ -24,4 +26,8 @@ func (l *Locker) Lock(key string, opts *api.QueryOptions) (bool, error) {
 
 func (l *Locker) Unlock(key string, opts *api.QueryOptions) (bool, error) {
 	return l.service.ReleaseLock(key, opts)
+}
+
+func (l *Locker) Destroy() error {
+	return l.service.StopRenewSession()
 }
